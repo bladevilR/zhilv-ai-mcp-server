@@ -1,5 +1,5 @@
-# 使用一个稳定且轻量的Python 3.10镜像作为基础
-FROM python:3.10-slim
+# 使用一个更新、稳定且轻量的Python 3.11镜像作为基础
+FROM python:3.11-slim
 
 # 在容器内创建一个工作目录
 WORKDIR /app
