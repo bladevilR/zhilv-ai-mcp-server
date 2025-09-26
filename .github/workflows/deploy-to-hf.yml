@@ -1,58 +1,62 @@
-name: Sync to Hugging Face Space (via git, with checks)
+name: Deploy to HF Space via API
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  sync:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show repo state
+      - name: Python & deps
         run: |
-          echo "Top-level files:"
-          ls -la
-          echo "Recent commits:"
-          git log --oneline -n 3 || true
+          python -V
+          pip install -q "huggingface_hub[hf_transfer]"
 
-      - name: Configure git identity
-        run: |
-          git config user.name  "${{ github.actor }}"
-          git config user.email "${{ github.actor }}@users.noreply.github.com"
-
-      - name: Check HF access & push
+      - name: Upload with HfApi (verbose)
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           set -e
+          python - <<'PY'
+          import os, traceback
+          from huggingface_hub import HfApi, HfHubHTTPError
 
-          if [ -z "$HF_TOKEN" ]; then
-            echo "❌ HF_TOKEN 未设置（GitHub → Settings → Secrets and variables → Actions）"
-            exit 1
-          fi
+          token = os.getenv("HF_TOKEN")
+          if not token or not token.startswith("hf_"):
+              raise SystemExit("HF_TOKEN 缺失或格式不对（应以 hf_ 开头）")
 
-          # 1) 用 HF API 检查是否对这个 Space 有访问权限
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $HF_TOKEN" \
-            https://huggingface.co/api/spaces/bladevil/zhilv-ai-server)
-          echo "HF API check HTTP $CODE"
-          if [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
-            echo "❌ Token 无效或无写权限：请用【bladevil】账号在 HF 生成 Write token，或把该账号加到 Space 的 Collaborators(Write)。"
-            exit 1
-          elif [ "$CODE" = "404" ]; then
-            echo "❌ Space 路径错误或不存在：应为 bladevil/zhilv-ai-server"
-            exit 1
-          fi
+          api = HfApi(token=token)
 
-          # 2) 通过 git 远端推送到 Space
-          HF_REMOTE="https://bladevil:${HF_TOKEN}@huggingface.co/spaces/bladevil/zhilv-ai-server"
-          git remote add hf "$HF_REMOTE" 2>/dev/null || git remote set-url hf "$HF_REMOTE"
+          # 1) 显示 token 属于谁
+          print("whoami:", api.whoami())
 
-          echo "Check remote connectivity (git ls-remote)…"
-          git ls-remote hf || { echo "❌ 无法访问 hf 远端（通常是权限问题）"; exit 1; }
+          REPO_ID   = "bladevil/zhilv-ai-server"
+          REPO_TYPE = "space"
 
-          echo "Push to hf main…"
-          git push hf HEAD:main --force-with-lease
-          echo "✅ 推送 OK。打开 Space 的 L
+          # 2) 确认空间存在 & 可写
+          try:
+              info = api.repo_info(REPO_ID, repo_type=REPO_TYPE)
+              print("repo_info ok:", info.id)
+          except HfHubHTTPError as e:
+              print("repo_info error:", e)
+              raise
+
+          # 3) 上传（自动处理大文件为 LFS；可按需忽略目录）
+          try:
+              api.upload_folder(
+                  repo_id=REPO_ID,
+                  repo_type=REPO_TYPE,
+                  folder_path=".",              # 如果你的代码在子目录，就改成那个目录名
+                  path_in_repo=".",
+                  commit_message="CI: sync from GitHub",
+                  ignore_patterns=[
+                      ".git/*", ".github/*", "__pycache__/*", "*.pyc"
+                  ],
+              )
+              print("UPLOAD DONE")
+          except Exception:
+              traceback.print_exc()
+              raise
+          PY
