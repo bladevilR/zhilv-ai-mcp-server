@@ -1,0 +1,35 @@
+name: Deploy to Hugging Face Space
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Sync repo to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          api.upload_folder(
+              repo_id="bladevil/zhilv-ai-server",  # 你的 Space 路径
+              repo_type="space",
+              folder_path=".",                      # 要上传的本仓库目录（根目录）
+              path_in_repo=".",                     # 上传到 Space 的根目录
+              commit_message="Sync from GitHub"
+          )
+          PY
