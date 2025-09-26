@@ -1,59 +1,35 @@
-name: Deploy to Hugging Face Space
+name: Sync to Hugging Face Space (via git)
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  deploy:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+      - name: Configure git identity
+        run: |
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
 
-      - name: Install huggingface_hub
-        run: pip install -q "huggingface_hub[hf_transfer]"
-
-      - name: Debug token & repo
+      - name: Push to HF Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           set -e
-          python - <<'PY'
-          import os, sys
-          from huggingface_hub import HfApi, HfHubHTTPError
-          t = os.environ.get("HF_TOKEN")
-          assert t and t.startswith("hf_"), "HF_TOKEN 缺失或格式不对（应以 hf_ 开头）"
-          api = HfApi(token=t)
-          print("✅ whoami:", api.whoami())
-          try:
-              files = api.list_repo_files("bladevil/zhilv-ai-server", repo_type="space")
-              print("✅ 找到 Space，并可读取文件。当前文件数：", len(files))
-          except HfHubHTTPError as e:
-              print("❌ 无法访问 Space（不存在或无权限）:", e)
-              sys.exit(1)
-          PY
+          test -n "$HF_TOKEN" || { echo "HF_TOKEN 未设置（Settings → Secrets and variables → Actions）"; exit 1; }
 
-      - name: Upload to Space
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          set -e
-          python - <<'PY'
-          import os
-          from huggingface_hub import HfApi
-          api = HfApi(token=os.environ["HF_TOKEN"])
-          api.upload_folder(
-              repo_id="bladevil/zhilv-ai-server",
-              repo_type="space",
-              folder_path=".",          # 若你的代码在子目录，请改成那个目录名
-              path_in_repo=".",
-              commit_message="Sync from GitHub",
-              ignore_patterns=[".git/*", ".github/*", "__pycache__/*", "*.pyc"]
-          )
-          print("✅ 上传完成，已触发 Space 构建。如仍无日志，请确认已添加 space.yaml 或 README 前置配置。")
-          PY
+          HF_REMOTE="https://bladevil:${HF_TOKEN}@huggingface.co/spaces/bladevil/zhilv-ai-server"
+
+          if git remote | grep -q '^hf$'; then
+            git remote set-url hf "$HF_REMOTE"
+          else
+            git remote add hf "$HF_REMOTE"
+          fi
+
+          # 推到 Space 的 main 分支
+          git push hf HEAD:main --force-with-lease
+          echo "✅ 已推送到 Hugging Face Space。打开 Space 的 Logs 查看构建。"
