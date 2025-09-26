@@ -20,16 +20,12 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           set -e
-          test -n "$HF_TOKEN" || { echo "HF_TOKEN 未设置（Settings → Secrets and variables → Actions）"; exit 1; }
-
+          test -n "$HF_TOKEN" || { echo "HF_TOKEN 未设置（Settings → Secrets → Actions 新建 HF_TOKEN）"; exit 1; }
           HF_REMOTE="https://bladevil:${HF_TOKEN}@huggingface.co/spaces/bladevil/zhilv-ai-server"
-
           if git remote | grep -q '^hf$'; then
             git remote set-url hf "$HF_REMOTE"
           else
             git remote add hf "$HF_REMOTE"
           fi
-
-          # 推到 Space 的 main 分支
           git push hf HEAD:main --force-with-lease
-          echo "✅ 已推送到 Hugging Face Space。打开 Space 的 Logs 查看构建。"
+          echo "✅ 已推送到 Hugging Face Space。到 Space 的 Logs 看构建输出。"
