@@ -1,0 +1,9 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.db-journal
+
+# IDE/Editor specific files
+.idea/
+.vscode/
