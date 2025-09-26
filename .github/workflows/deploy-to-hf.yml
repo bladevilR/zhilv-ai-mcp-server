@@ -1,7 +1,7 @@
 name: Deploy to Hugging Face Space
 on:
   push:
-    branches: [ "main" ]   # 如果默认分支不是 main，这里改成你的分支名
+    branches: [ "main" ]
 
 jobs:
   deploy:
@@ -16,21 +16,60 @@ jobs:
           python-version: "3.10"
 
       - name: Install huggingface_hub
-        run: pip install huggingface_hub
+        run: pip install "huggingface_hub[hf_transfer]"
 
-      - name: Sync repo to HF Space
+      - name: Preflight check & deploy
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}   # 你在 Settings/Secrets 里添加的 token
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          set -e
           python - <<'PY'
-          import os
-          from huggingface_hub import HfApi
-          api = HfApi(token=os.environ["HF_TOKEN"])
-          api.upload_folder(
-              repo_id="bladevil/zhilv-ai-server",  # 你的 Space 路径
-              repo_type="space",
-              folder_path=".",                      # 代码所在目录；若在子目录就改成例如 "server"
-              path_in_repo=".",
-              commit_message="Sync from GitHub"
-          )
+          import os, sys, traceback
+          from huggingface_hub import HfApi, HfHubHTTPError
+
+          token = os.environ.get("HF_TOKEN")
+          if not token or not token.startswith("hf_"):
+              print("❌ HF_TOKEN 缺失或格式不对（应以 hf_ 开头）。请在 GitHub → Settings → Secrets → Actions 添加 HF_TOKEN，并给 Write 权限。")
+              sys.exit(1)
+
+          api = HfApi(token=token)
+
+          REPO_ID = "bladevil/zhilv-ai-server"
+          REPO_TYPE = "space"
+
+          # 1) whoami: 校验 token 是否有效 & 有哪些权限
+          try:
+              me = api.whoami()
+              print(f"✅ 登录账号：{me.get('name') or me}")
+          except Exception as e:
+              print("❌ whoami 失败（Token 无效或网络问题）：", e)
+              sys.exit(1)
+
+          # 2) 校验空间是否存在且是 Space 仓库
+          try:
+              info = api.repo_info(repo_id=REPO_ID, repo_type=REPO_TYPE)
+              print(f"✅ 找到 Space：{REPO_ID}（类型：{REPO_TYPE}）")
+          except HfHubHTTPError as e:
+              print("❌ 找不到 Space 或无权限：", e)
+              print("   请确认：repo_id=bladevil/zhilv-ai-server 拼写正确，且 HF_TOKEN 对该 Space 有写权限。")
+              sys.exit(1)
+          except Exception as e:
+              print("❌ 查询 Space 失败：", e)
+              sys.exit(1)
+
+          # 3) 上传（忽略不需要的文件；若代码在子目录，把 folder_path 改成该目录名）
+          try:
+              api.upload_folder(
+                  repo_id=REPO_ID,
+                  repo_type=REPO_TYPE,
+                  folder_path=".",
+                  path_in_repo=".",
+                  commit_message="Sync from GitHub",
+                  ignore_patterns=[".git/*", ".github/*", "__pycache__/*", "*.pyc"]
+              )
+              print("✅ 上传完成，已触发 Space 构建（如有 space.yaml/README 配置）")
+          except Exception as e:
+              print("❌ 上传失败：")
+              traceback.print_exc()
+              sys.exit(1)
           PY
